@@ -62,8 +62,11 @@ export async function searchAll(query: DeskQuery): Promise<DeskResult> {
   const [newspapers, wikitree, burials] = await Promise.all([
     settle(
       searchNewspapers(query),
-      20000,
-      emptySource("https://www.loc.gov/collections/chronicling-america/", "Library of Congress took too long. Retry once."),
+      100_000,
+      emptySource(
+        "https://www.loc.gov/collections/chronicling-america/",
+        "Library of Congress took too long after one retry. Other sources in this response are unaffected.",
+      ),
     ),
     settle(
       searchWiki(query),

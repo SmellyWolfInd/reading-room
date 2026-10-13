@@ -3,9 +3,39 @@ import { emptySource } from "./types";
 import { fetchText } from "./http.server";
 import { asArray, asRecord, explainError, str, strList } from "./json";
 import { altoToText, clip, passageAround, stateFromPlace } from "./text";
+import { retryableLocStatus } from "./loc-retry";
 
 const PAGE_HOSTS = ["www.loc.gov", "loc.gov", "chroniclingamerica.loc.gov"];
 const OCR_HOSTS = ["tile.loc.gov"];
+const LOC_BACKOFF_MS = 2000;
+
+function retryableLocError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if (error.name === "TimeoutError" || error.name === "AbortError") return true;
+  return /fetch failed|network|ECONN|ETIMEDOUT|socket|timed out/i.test(error.message);
+}
+
+async function fetchLoc(
+  url: string,
+  hosts: readonly string[],
+  accept: string,
+  timeouts: readonly number[],
+): Promise<{ status: number; text: string }> {
+  let failure: unknown;
+  for (let attempt = 0; attempt < timeouts.length; attempt += 1) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, LOC_BACKOFF_MS));
+    try {
+      const result = await fetchText(url, accept, timeouts[attempt], hosts);
+      const again = retryableLocStatus(result.status) && attempt < timeouts.length - 1;
+      if (!again) return result;
+      failure = new Error(`Library of Congress returned ${result.status}.`);
+    } catch (error) {
+      failure = error;
+      if (!retryableLocError(error) || attempt === timeouts.length - 1) throw error;
+    }
+  }
+  throw failure instanceof Error ? failure : new Error("Library of Congress did not answer.");
+}
 
 function newspaperQuery(query: DeskQuery): string {
   return [query.given, query.surname, query.words].filter(Boolean).join(" ").trim();
@@ -41,9 +71,12 @@ export async function searchNewspapers(query: DeskQuery): Promise<SourceResult<N
     return emptySource(open, "Add a name or words. Newspaper search is full-page OCR, not a name index.");
   }
   try {
-    const { status, text } = await fetchText(api, "application/json, text/plain, */*", 45000, PAGE_HOSTS);
+    const { status, text } = await fetchLoc(api, PAGE_HOSTS, "application/json, text/plain, */*", [40000, 50000]);
     if (status < 200 || status >= 300) {
-      return emptySource(open, `Library of Congress returned ${status}.`);
+      return emptySource(
+        open,
+        `Library of Congress returned ${status}. Other sources in this response are unaffected.`,
+      );
     }
     const body = JSON.parse(text) as unknown;
     const root = asRecord(body);
@@ -76,7 +109,8 @@ export async function searchNewspapers(query: DeskQuery): Promise<SourceResult<N
       .join(" ");
     return { ok: true, total, hits, openUrl: open, note };
   } catch (error) {
-    return emptySource(open, explainError(error));
+    const detail = explainError(error);
+    return emptySource(open, `${detail} Other sources in this response are unaffected.`);
   }
 }
 
@@ -128,7 +162,12 @@ export async function readNewspaperPage(rawUrl: string, focus: string, maxChars:
   const pageUrl = assertLocPage(rawUrl);
   pageUrl.searchParams.delete("fo");
   pageUrl.searchParams.set("fo", "json");
-  const { status, text } = await fetchText(pageUrl.toString(), "application/json, text/plain, */*", 45000, PAGE_HOSTS);
+  const { status, text } = await fetchLoc(
+    pageUrl.toString(),
+    PAGE_HOSTS,
+    "application/json, text/plain, */*",
+    [40000, 50000],
+  );
   if (status < 200 || status >= 300) throw new Error(`Library of Congress returned ${status}.`);
   const payload = JSON.parse(text) as unknown;
   const root = asRecord(payload);
@@ -140,7 +179,7 @@ export async function readNewspaperPage(rawUrl: string, focus: string, maxChars:
   const xml = xmlUrl(payload);
   let ocr = "";
   if (xml) {
-    const file = await fetchText(allowedOcrFile(xml), "text/xml, application/xml, text/plain", 25000, OCR_HOSTS);
+    const file = await fetchLoc(allowedOcrFile(xml), OCR_HOSTS, "text/xml, application/xml, text/plain", [25000, 40000]);
     if (file.status >= 200 && file.status < 300) ocr = altoToText(file.text);
   }
   if (!ocr) ocr = strList(source.description);

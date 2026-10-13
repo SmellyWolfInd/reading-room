@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { presentPaper, presentSearch } from "./present.ts";
+import { retryableLocStatus } from "./loc-retry.ts";
 import { decodeEntities, htmlToText, stateFromPlace } from "./text.ts";
 import { emptySource, parseDeskQuery } from "./types.ts";
 
@@ -9,6 +10,13 @@ test("decodes escaped biography and OCR text", () => {
   assert.equal(decodeEntities("&amp;amp;"), "&");
   assert.equal(htmlToText("<p>Born&nbsp;1905 &amp; raised</p>"), "Born 1905 & raised");
   assert.equal(decodeEntities("&#x2019;"), "\u2019");
+});
+
+test("retries only transient Library of Congress statuses", () => {
+  assert.equal(retryableLocStatus(503), true);
+  assert.equal(retryableLocStatus(429), true);
+  assert.equal(retryableLocStatus(404), false);
+  assert.equal(retryableLocStatus(200), false);
 });
 
 test("maps a postal abbreviation in a place", () => {

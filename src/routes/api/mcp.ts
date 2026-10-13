@@ -3,7 +3,7 @@ import { BOT_INSTRUCTIONS, presentBurial, presentPaper, presentProfile, presentS
 import { parseDeskQuery } from "@/lib/research/types";
 
 const PROTOCOL = "2025-03-26";
-const SERVER_VERSION = "1.1.0";
+const SERVER_VERSION = "1.2.0";
 const SUPPORTED = new Set(["2024-11-05", "2025-03-26", "2025-06-18"]);
 
 const cors: Record<string, string> = {
