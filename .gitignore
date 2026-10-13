@@ -1,0 +1,15 @@
+node_modules
+dist
+.output
+.vercel
+.nitro
+screenshots
+artifacts
+.grok
+AGENTS.md
+.project_id
+.node_modules.lock
+*.log
+.DS_Store
+.env
+.env.*
